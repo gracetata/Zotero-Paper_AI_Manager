@@ -104,5 +104,5 @@ tags:
 watchdog:
   zotero_db: "/home/YOUR_USERNAME/Zotero/zotero.sqlite"
   processed_ids_file: "/home/YOUR_USERNAME/Workspace/PaperManager/.processed_ids"
-  debounce_seconds: 5
-  poll_interval: 1
+  wait_after_change: 30   # 检测到 DB 变化后，等待 N 秒让 Zotero 写完再查（秒）
+  poll_interval_secs: 120  # 无变化时兜底轮询间隔（秒）

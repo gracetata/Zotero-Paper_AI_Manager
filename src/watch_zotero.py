@@ -1,32 +1,41 @@
 """
-watch_zotero.py — 全自动模式：监控 Zotero 数据库变化，自动触发论文分析
-使用 watchdog 库监控 zotero.sqlite 文件修改事件
+watch_zotero.py — 全自动模式：监控 Zotero 数据库变化，弹出终端分析新论文
+
+架构：
+  文件系统 watchdog → 检测到 DB 变化 → 设 dirty 标志
+  后台轮询线程 → 每隔 N 秒（或 dirty 后延迟）调用 Zotero Web API 查询新条目
+  → 发现新条目 → 弹出 gnome-terminal 运行 analyze_and_chat.sh
 
 用法:
-  python watch_zotero.py              # 前台运行（Ctrl+C 停止）
+  python watch_zotero.py              # 持续监控
   python watch_zotero.py --once       # 检查一次新条目后退出
 """
 
 import os
 import sys
 import time
-import sqlite3
+import threading
+import subprocess
 import yaml
 import argparse
-import subprocess
 from datetime import datetime
+
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-# 添加 src 到路径
 sys.path.insert(0, os.path.dirname(__file__))
+from zotero_client import ZoteroClient
 
+
+# ── 配置 ─────────────────────────────────────────────────────
 
 def load_config():
     config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
+
+# ── 已处理 ID 记录 ────────────────────────────────────────────
 
 def load_processed_ids(processed_file):
     if os.path.exists(processed_file):
@@ -40,52 +49,33 @@ def save_processed_id(processed_file, item_key):
         f.write(item_key + '\n')
 
 
-def get_new_item_keys_from_db(db_path, processed_ids, limit=10):
+# ── Zotero Web API 查询新条目（不读 SQLite，绕开锁）────────────
+
+def get_new_items_via_api(zotero_client, processed_ids, limit=20):
     """
-    直接查询 Zotero SQLite 数据库，获取最新添加的条目 keys。
-    注意：Zotero 运行时数据库可能被锁定，使用 WAL mode 可以读取。
+    调用 Zotero Web API 获取最近条目，过滤掉已处理的。
+    返回新条目的 key 列表（最新的在前）。
     """
-    new_keys = []
     try:
-        # 使用只读模式连接，避免干扰 Zotero 正常运行
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
-        cursor = conn.cursor()
+        recent = zotero_client.get_recent_items(limit=limit)
+        return [
+            item['data']['key']
+            for item in recent
+            if item['data']['key'] not in processed_ids
+        ]
+    except Exception as e:
+        print(f"  [WARN] Zotero API 查询失败: {e}")
+        return []
 
-        # 查询最近添加的顶级条目（非附件）
-        cursor.execute("""
-            SELECT i.key
-            FROM items i
-            JOIN itemTypes it ON i.itemTypeID = it.itemTypeID
-            WHERE it.typeName NOT IN ('attachment', 'note', 'annotation')
-            ORDER BY i.dateAdded DESC
-            LIMIT ?
-        """, (limit,))
 
-        rows = cursor.fetchall()
-        conn.close()
-
-        for (key,) in rows:
-            if key not in processed_ids:
-                new_keys.append(key)
-
-    except sqlite3.OperationalError as e:
-        # 数据库被锁定时跳过本次检查
-        print(f"  [WARN] 数据库暂时不可读: {e}")
-
-    return new_keys
-
+# ── 终端弹出 ──────────────────────────────────────────────────
 
 def find_terminal():
-    """查找可用的终端模拟器，返回启动命令模板"""
     import shutil
-    # 按优先级尝试
     candidates = [
-        # (可执行文件, 执行参数模板)  {title}=窗口标题 {cmd}=要运行的命令
         ('gnome-terminal', ['gnome-terminal', '--title={title}', '--', 'bash', '-c', '{cmd}']),
         ('xterm',          ['xterm', '-title', '{title}', '-e', 'bash', '-c', '{cmd}']),
-        ('konsole',        ['konsole', '--title', '{title}', '-e', 'bash', '-c', '{cmd}']),
-        ('xfce4-terminal', ['xfce4-terminal', '--title={title}', '-e', 'bash -c {cmd_q}']),
-        ('tilix',          ['tilix', '--title={title}', '-e', 'bash -c {cmd_q}']),
+        ('konsole',        ['konsole', '--title', '{title}', '-e', 'bash -c {cmd_q}']),
     ]
     for exe, template in candidates:
         if shutil.which(exe):
@@ -93,109 +83,162 @@ def find_terminal():
     return None, None
 
 
-def trigger_analysis_in_terminal(item_key, config_path):
-    """
-    在新终端窗口中运行分析脚本。
-    分析完成后，终端内提示用户是否进入追问模式。
-    """
+def popup_terminal_for_item(item_key, config):
+    """在新终端窗口中分析指定论文，完成后提示追问"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     shell_script = os.path.join(script_dir, 'analyze_and_chat.sh')
 
     exe, template = find_terminal()
-    if exe is None:
-        print(f"  ⚠️  未找到图形终端，回退到后台分析模式")
-        trigger_analysis_background(item_key, config_path)
-        return
-
     title = f"📄 论文分析 — {item_key}"
-    # analyze_and_chat.sh 接收 ITEM_KEY 参数
     inner_cmd = f'bash "{shell_script}" "{item_key}"; exec bash'
 
-    cmd = []
-    for part in template:
-        cmd.append(
-            part.replace('{title}', title)
-                .replace('{cmd}', inner_cmd)
-                .replace('{cmd_q}', f'"{inner_cmd}"')
-        )
-
-    print(f"\n🆕 [{datetime.now().strftime('%H:%M:%S')}] 发现新论文 {item_key}，弹出终端窗口...")
-
-    # 需要 DISPLAY 环境变量（systemd 服务里要额外设置）
+    # 构建完整的环境变量（gnome-terminal 需要 DISPLAY + DBUS）
     env = os.environ.copy()
-    if 'DISPLAY' not in env:
+    if 'DISPLAY' not in env or not env['DISPLAY']:
         env['DISPLAY'] = ':1'
-    # 保留 DBUS_SESSION_BUS_ADDRESS，gnome-terminal 需要
-    try:
-        subprocess.Popen(cmd, env=env, start_new_session=True)
-    except Exception as e:
-        print(f"  ❌ 无法打开终端窗口: {e}，回退到后台模式")
-        trigger_analysis_background(item_key, config_path)
+    if 'DBUS_SESSION_BUS_ADDRESS' not in env or not env['DBUS_SESSION_BUS_ADDRESS']:
+        env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{os.getuid()}/bus'
+
+    if exe:
+        cmd = []
+        for part in template:
+            cmd.append(
+                part.replace('{title}', title)
+                    .replace('{cmd}', inner_cmd)
+                    .replace('{cmd_q}', f'"{inner_cmd}"')
+            )
+        try:
+            subprocess.Popen(cmd, env=env, start_new_session=True)
+            print(f"  🖥️  已弹出终端窗口（{exe}）")
+            return True
+        except Exception as e:
+            print(f"  ⚠️  弹出终端失败: {e}，改用后台分析")
+    else:
+        print(f"  ⚠️  未找到图形终端，改用后台分析")
+
+    # 后台兜底
+    analyzer = os.path.join(script_dir, 'paper_analyzer.py')
+    config_path = os.path.join(script_dir, '..', 'config.yaml')
+    subprocess.Popen([sys.executable, analyzer, '--key', item_key, '--config', config_path])
+    return False
 
 
-def trigger_analysis_background(item_key, config_path):
-    """回退：后台静默分析（无图形环境时使用）"""
-    analyzer_path = os.path.join(os.path.dirname(__file__), 'paper_analyzer.py')
-    cmd = [sys.executable, analyzer_path, '--key', item_key, '--config', config_path]
-    print(f"\n🆕 [{datetime.now().strftime('%H:%M:%S')}] 后台分析: {item_key}")
-    try:
-        subprocess.Popen(cmd)
-    except Exception as e:
-        print(f"  ❌ 触发分析失败: {e}")
+# ── 文件系统事件处理（仅作触发信号）────────────────────────────
 
+class ZoteroDBTrigger(FileSystemEventHandler):
+    """监控 Zotero DB 文件变化，向主循环发送 dirty 信号"""
 
-def trigger_analysis(item_key, config_path):
-    """触发分析（优先弹出终端，无图形时后台运行）"""
-    trigger_analysis_in_terminal(item_key, config_path)
-
-
-class ZoteroDBHandler(FileSystemEventHandler):
-    """监控 Zotero 数据库目录的文件变化事件"""
-
-    def __init__(self, db_path, processed_file, config_path, debounce_secs=5):
+    def __init__(self, db_path, on_change_callback):
         self.db_path = db_path
-        self.processed_file = processed_file
-        self.config_path = config_path
-        self.debounce_secs = debounce_secs
-        self._last_trigger = 0
+        self._callback = on_change_callback
+        self._last_signal = 0
 
     def on_modified(self, event):
-        # 只关注 zotero.sqlite 或其 WAL 文件的变化
-        if not any(self.db_path in event.src_path for _ in [1]):
-            return
         if event.is_directory:
             return
-
+        # 只关注 zotero.sqlite 或 .sqlite-wal 变化
+        src = event.src_path
+        if not (self.db_path in src or src.endswith('.sqlite-wal')):
+            return
         now = time.time()
-        if now - self._last_trigger < self.debounce_secs:
-            return  # 防抖：避免短时间内重复触发
-        self._last_trigger = now
+        if now - self._last_signal < 5:   # 5s 内只发一次信号
+            return
+        self._last_signal = now
+        self._callback()
 
-        print(f"\n📡 [{datetime.now().strftime('%H:%M:%S')}] 检测到 Zotero 数据库变化，检查新条目...")
 
+# ── 主监控器 ─────────────────────────────────────────────────
+
+class ZoteroWatcher:
+    def __init__(self, config):
+        self.config = config
+        wdog_cfg = config.get('watchdog', {})
+        self.db_path = wdog_cfg.get('zotero_db', os.path.expanduser('~/Zotero/zotero.sqlite'))
+        self.processed_file = wdog_cfg.get(
+            'processed_ids_file',
+            os.path.join(os.path.dirname(__file__), '..', '.processed_ids')
+        )
+        # 等待 Zotero 写完整条目（含元数据+PDF）的时间
+        self.wait_after_change = int(wdog_cfg.get('wait_after_change', 30))
+        # 无文件变化时的兜底轮询间隔
+        self.poll_interval = int(wdog_cfg.get('poll_interval_secs', 120))
+
+        self._dirty = threading.Event()   # 文件系统变化标志
+        self._stop = threading.Event()
+        self._zotero_client = ZoteroClient(config)
+
+    def _on_db_change(self):
+        ts = datetime.now().strftime('%H:%M:%S')
+        print(f"\n📡 [{ts}] 检测到 Zotero 数据库变化，{self.wait_after_change}s 后检查新条目...")
+        self._dirty.set()
+
+    def _check_and_process(self):
+        """调用 Zotero API 查新条目并处理"""
         processed_ids = load_processed_ids(self.processed_file)
-        new_keys = get_new_item_keys_from_db(self.db_path, processed_ids, limit=5)
+        new_keys = get_new_items_via_api(self._zotero_client, processed_ids)
 
         if not new_keys:
-            print("  ℹ️  无新增论文条目")
+            print(f"  ℹ️  暂无新增论文条目")
             return
 
+        print(f"  🆕 发现 {len(new_keys)} 篇新论文: {new_keys}")
         for key in new_keys:
-            # 先标记为已处理，防止重复
             save_processed_id(self.processed_file, key)
-            trigger_analysis(key, self.config_path)
+            print(f"\n🚀 [{datetime.now().strftime('%H:%M:%S')}] 处理新论文: {key}")
+            popup_terminal_for_item(key, self.config)
+            time.sleep(2)  # 避免同时弹多个窗口
 
+    def run(self):
+        if not os.path.exists(self.db_path):
+            print(f"❌ 找不到 Zotero 数据库: {self.db_path}")
+            sys.exit(1)
+
+        # 启动文件系统监控
+        trigger = ZoteroDBTrigger(self.db_path, self._on_db_change)
+        observer = Observer()
+        observer.schedule(trigger, path=os.path.dirname(self.db_path), recursive=False)
+        observer.start()
+
+        print(f"👁️  开始监控 Zotero（{self.db_path}）")
+        print(f"   变化检测后等待 {self.wait_after_change}s 再查新条目")
+        print(f"   兜底轮询间隔: {self.poll_interval}s")
+        print(f"   按 Ctrl+C 停止\n")
+
+        try:
+            while not self._stop.is_set():
+                # 等待 dirty 信号（文件变化）或超时（兜底轮询）
+                changed = self._dirty.wait(timeout=self.poll_interval)
+
+                if self._stop.is_set():
+                    break
+
+                if changed:
+                    # 等待 Zotero 把条目写完整
+                    time.sleep(self.wait_after_change)
+                    self._dirty.clear()
+
+                print(f"\n🔍 [{datetime.now().strftime('%H:%M:%S')}] 检查新条目（via Zotero API）...")
+                self._check_and_process()
+
+        except KeyboardInterrupt:
+            pass
+        finally:
+            observer.stop()
+            observer.join()
+            print("\n⏹️  监控已停止")
+
+
+# ── 单次检查模式 ──────────────────────────────────────────────
 
 def check_once(config):
-    """单次检查模式：处理所有未分析的新条目"""
     wdog_cfg = config.get('watchdog', {})
-    db_path = wdog_cfg.get('zotero_db', os.path.expanduser('~/Zotero/zotero.sqlite'))
-    processed_file = wdog_cfg.get('processed_ids_file',
-                                   os.path.join(os.path.dirname(__file__), '..', '.processed_ids'))
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
-
+    processed_file = wdog_cfg.get(
+        'processed_ids_file',
+        os.path.join(os.path.dirname(__file__), '..', '.processed_ids')
+    )
+    zotero_client = ZoteroClient(config)
     processed_ids = load_processed_ids(processed_file)
-    new_keys = get_new_item_keys_from_db(db_path, processed_ids, limit=20)
+    new_keys = get_new_items_via_api(zotero_client, processed_ids, limit=20)
 
     if not new_keys:
         print("✅ 没有发现未处理的新论文")
@@ -204,8 +247,11 @@ def check_once(config):
     print(f"🔍 发现 {len(new_keys)} 篇未处理论文")
     for key in new_keys:
         save_processed_id(processed_file, key)
-        trigger_analysis(key, config_path)
+        popup_terminal_for_item(key, config)
+        time.sleep(2)
 
+
+# ── 入口 ─────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='Zotero 论文自动监控工具')
@@ -213,7 +259,6 @@ def main():
     args = parser.parse_args()
 
     config = load_config()
-
     if config['zotero']['api_key'] == 'YOUR_ZOTERO_API_KEY':
         print("❌ 请先在 config.yaml 中配置 Zotero API Key")
         sys.exit(1)
@@ -222,38 +267,7 @@ def main():
         check_once(config)
         return
 
-    # 持续监控模式
-    wdog_cfg = config.get('watchdog', {})
-    db_path = wdog_cfg.get('zotero_db', os.path.expanduser('~/Zotero/zotero.sqlite'))
-    db_dir = os.path.dirname(db_path)
-    processed_file = wdog_cfg.get('processed_ids_file',
-                                   os.path.join(os.path.dirname(__file__), '..', '.processed_ids'))
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
-    debounce = wdog_cfg.get('debounce_seconds', 5)
-
-    if not os.path.exists(db_path):
-        print(f"❌ 找不到 Zotero 数据库: {db_path}")
-        print("   请检查 config.yaml 中的 watchdog.zotero_db 路径")
-        sys.exit(1)
-
-    print(f"👁️  开始监控 Zotero 数据库...")
-    print(f"   数据库路径: {db_path}")
-    print(f"   防抖间隔: {debounce}s")
-    print(f"   按 Ctrl+C 停止\n")
-
-    event_handler = ZoteroDBHandler(db_path, processed_file, config_path, debounce_secs=debounce)
-    observer = Observer()
-    observer.schedule(event_handler, path=db_dir, recursive=False)
-    observer.start()
-
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-        print("\n\n⏹️  监控已停止")
-
-    observer.join()
+    ZoteroWatcher(config).run()
 
 
 if __name__ == '__main__':
