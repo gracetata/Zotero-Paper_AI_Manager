@@ -1,0 +1,108 @@
+# PaperManager 配置模板
+# 复制此文件为 config.yaml 并填写你的 API Keys：
+#   cp config.example.yaml config.yaml
+
+# ============================================================
+# Zotero 配置
+# 获取方式：登录 https://www.zotero.org/settings/keys
+#   → New Key → 勾选 Personal Library (读+写) → 保存
+# ============================================================
+zotero:
+  library_id: "YOUR_ZOTERO_USER_ID"     # 数字 ID，在 zotero.org/settings/keys 页面顶部可见
+  api_key: "YOUR_ZOTERO_API_KEY"         # 创建的 API Key 字符串
+  library_type: "user"                   # 个人库用 "user"，群组库用 "group"
+  local_storage: "/home/YOUR_USERNAME/Zotero/storage"  # Zotero 本地存储路径
+
+# ============================================================
+# GitHub Models API 配置（免费，使用 GPT-4o）
+# 获取方式：https://github.com/settings/tokens
+#   → Generate new token → 勾选 models:read
+# ============================================================
+github_models:
+  token: "YOUR_GITHUB_PERSONAL_ACCESS_TOKEN"
+  endpoint: "https://models.inference.ai.azure.com"
+  model: "gpt-4o"                        # 可选: gpt-4o, gpt-4o-mini
+  max_tokens: 2048
+  temperature: 0.3
+
+# ============================================================
+# Anthropic API 配置（可选）
+# 使用 Claude 模型可获得更大上下文（200k tokens），适合长文献
+# 获取方式：https://console.anthropic.com/settings/keys
+# 用法：python paper_analyzer.py --recent 1 --model claude-haiku-4-5
+# ============================================================
+anthropic:
+  api_key: ""                            # 填入你的 Anthropic API Key (sk-ant-...)
+  # 可选模型：
+  #   claude-haiku-4-5     — 快速/低成本，上下文 200k tokens
+  #   claude-sonnet-4-6    — 强力推荐，上下文 200k tokens
+
+# ============================================================
+# 输出配置
+# ============================================================
+output:
+  notes_dir: "/home/YOUR_USERNAME/Workspace/PaperManager/notes"
+  index_file: "/home/YOUR_USERNAME/Workspace/PaperManager/notes/INDEX.md"
+  skill_file: "/home/YOUR_USERNAME/Workspace/PaperManager/skills/read-paper/SKILL.md"
+
+# ============================================================
+# PDF 提取配置
+# ============================================================
+pdf:
+  max_chars: 150000     # 字符安全上限（150k ≈ 50k tokens）
+
+# ============================================================
+# 上下文自动切换配置
+# ============================================================
+model_fallback:
+  enabled: true
+  threshold_chars: 80000        # 超过 8 万字符时切换
+  large_context_model: "gpt-4o"
+
+# ============================================================
+# 预定义标签体系（按需修改）
+# ============================================================
+tags:
+  domain:
+    - 下肢假肢
+    - 膝关节
+    - 踝关节
+    - 外骨骼
+    - 移动机器人
+    - 四足机器人
+    - 人形机器人
+    - 上肢假肢
+    - 康复机器人
+    - 强化学习
+    - 最优控制
+    - 运动规划
+    - 仿真迁移
+
+  method:
+    - 综述
+    - 仅仿真
+    - 真实实验
+    - 模仿学习
+    - 基于模型
+    - 无模型
+    - Transformer
+    - 扩散模型
+    - 轨迹优化
+    - 参数估计
+    - 系统辨识
+
+  status:
+    - 待读
+    - 已读
+    - 重要文献
+    - 需复现
+    - 背景阅读
+
+# ============================================================
+# watchdog 配置（全自动模式）
+# ============================================================
+watchdog:
+  zotero_db: "/home/YOUR_USERNAME/Zotero/zotero.sqlite"
+  processed_ids_file: "/home/YOUR_USERNAME/Workspace/PaperManager/.processed_ids"
+  debounce_seconds: 5
+  poll_interval: 1

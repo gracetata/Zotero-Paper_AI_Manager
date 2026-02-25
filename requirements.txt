@@ -1,0 +1,6 @@
+pyzotero
+PyMuPDF
+watchdog
+pyyaml
+requests
+anthropic

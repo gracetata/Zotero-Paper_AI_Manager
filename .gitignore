@@ -1,0 +1,36 @@
+# =============================
+# 敏感配置（含 API Keys）—— 绝对不提交！
+# 本地使用 config.yaml，参考模板 config.example.yaml
+# =============================
+config.yaml
+
+# 已处理论文记录
+.processed_ids
+
+# 分析输出（个人数据）
+notes/
+
+# 批处理日志
+batch.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
