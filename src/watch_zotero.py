@@ -167,31 +167,61 @@ class ZoteroWatcher:
         self._stop = threading.Event()
         self._zotero_client = ZoteroClient(config)
 
+    def _initialize_known_items(self):
+        """
+        启动时把当前 Zotero 库里所有条目标记为「已知」，
+        这样 watchdog 只对启动之后新增的论文触发分析。
+        """
+        processed_ids = load_processed_ids(self.processed_file)
+        try:
+            all_items = self._zotero_client.get_all_items()
+            all_keys = {it['data']['key'] for it in all_items}
+            new_to_mark = all_keys - processed_ids
+            if new_to_mark:
+                with open(self.processed_file, 'a') as f:
+                    for k in sorted(new_to_mark):
+                        f.write(k + '\n')
+                print(f"   ✅ 已将现有 {len(all_keys)} 篇论文标记为「已知」（新增 {len(new_to_mark)} 条）")
+            else:
+                print(f"   ✅ 已知条目记录完整（{len(all_keys)} 篇）")
+        except Exception as e:
+            print(f"   ⚠️  初始化已知条目失败: {e}（watchdog 仍会运行，但可能误报）")
+
     def _on_db_change(self):
         ts = datetime.now().strftime('%H:%M:%S')
         print(f"\n📡 [{ts}] 检测到 Zotero 数据库变化，{self.wait_after_change}s 后检查新条目...")
         self._dirty.set()
 
     def _check_and_process(self):
-        """调用 Zotero API 查新条目并处理"""
+        """调用 Zotero API 查新条目并处理，每次最多处理1篇（防止级联弹窗）"""
         processed_ids = load_processed_ids(self.processed_file)
-        new_keys = get_new_items_via_api(self._zotero_client, processed_ids)
+        new_keys = get_new_items_via_api(self._zotero_client, processed_ids, limit=20)
 
         if not new_keys:
             print(f"  ℹ️  暂无新增论文条目")
             return
 
-        print(f"  🆕 发现 {len(new_keys)} 篇新论文: {new_keys}")
-        for key in new_keys:
-            save_processed_id(self.processed_file, key)
-            print(f"\n🚀 [{datetime.now().strftime('%H:%M:%S')}] 处理新论文: {key}")
-            popup_terminal_for_item(key, self.config)
-            time.sleep(2)  # 避免同时弹多个窗口
+        # 每次只处理1篇，避免同时弹出多个终端
+        key = new_keys[0]
+        if len(new_keys) > 1:
+            print(f"  ℹ️  发现 {len(new_keys)} 篇新条目，本次处理第1篇，其余下次检查时处理")
+        save_processed_id(self.processed_file, key)
+        print(f"\n🚀 [{datetime.now().strftime('%H:%M:%S')}] 新论文: {key}")
+        popup_terminal_for_item(key, self.config)
 
     def run(self):
         if not os.path.exists(self.db_path):
             print(f"❌ 找不到 Zotero 数据库: {self.db_path}")
             sys.exit(1)
+
+        # 启动时先把现有所有条目标记为「已知」
+        print(f"👁️  Zotero-Paper_AI_Manager 启动中...")
+        print(f"   数据库: {self.db_path}")
+        print(f"   检测到变化后等待 {self.wait_after_change}s 再查（让 Zotero 写完）")
+        print(f"   兜底轮询间隔: {self.poll_interval}s")
+        self._initialize_known_items()
+        print(f"   ✅ 就绪，只对启动后新增的论文自动弹窗分析")
+        print(f"   按 Ctrl+C 停止\n")
 
         # 启动文件系统监控
         trigger = ZoteroDBTrigger(self.db_path, self._on_db_change)
@@ -199,24 +229,15 @@ class ZoteroWatcher:
         observer.schedule(trigger, path=os.path.dirname(self.db_path), recursive=False)
         observer.start()
 
-        print(f"👁️  开始监控 Zotero（{self.db_path}）")
-        print(f"   变化检测后等待 {self.wait_after_change}s 再查新条目")
-        print(f"   兜底轮询间隔: {self.poll_interval}s")
-        print(f"   按 Ctrl+C 停止\n")
-
         try:
             while not self._stop.is_set():
                 # 等待 dirty 信号（文件变化）或超时（兜底轮询）
                 changed = self._dirty.wait(timeout=self.poll_interval)
-
                 if self._stop.is_set():
                     break
-
                 if changed:
-                    # 等待 Zotero 把条目写完整
                     time.sleep(self.wait_after_change)
                     self._dirty.clear()
-
                 print(f"\n🔍 [{datetime.now().strftime('%H:%M:%S')}] 检查新条目（via Zotero API）...")
                 self._check_and_process()
 
