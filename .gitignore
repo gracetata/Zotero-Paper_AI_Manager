@@ -6,12 +6,18 @@ config.yaml
 
 # 已处理论文记录
 .processed_ids
+.pending_pdf
 
 # 分析输出（个人数据）
 notes/
 
 # 批处理日志
 batch.log
+
+# VS Code 扩展构建产物
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/package-lock.json
 
 # Python
 __pycache__/

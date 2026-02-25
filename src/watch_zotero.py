@@ -194,6 +194,10 @@ class ZoteroWatcher:
 
     def _check_and_process(self):
         """调用 Zotero API 查新条目并处理，每次最多处理1篇（防止级联弹窗）"""
+        # ① 检查 pending PDF 队列（之前因没有PDF而暂停的条目）
+        self._check_pending_pdfs()
+
+        # ② 检查是否有新加入的条目
         processed_ids = load_processed_ids(self.processed_file)
         new_keys = get_new_items_via_api(self._zotero_client, processed_ids, limit=20)
 
@@ -208,6 +212,37 @@ class ZoteroWatcher:
         save_processed_id(self.processed_file, key)
         print(f"\n🚀 [{datetime.now().strftime('%H:%M:%S')}] 新论文: {key}")
         popup_terminal_for_item(key, self.config)
+
+    def _check_pending_pdfs(self):
+        """
+        检查 .pending_pdf 队列：对已有 PDF 的条目重新触发终端弹窗。
+        当用户在 Zotero 中手动为条目添加 PDF 后，自动继续分析。
+        """
+        pending_file = os.path.join(os.path.dirname(__file__), '..', '.pending_pdf')
+        if not os.path.exists(pending_file):
+            return
+        with open(pending_file, 'r') as f:
+            pending = [line.strip() for line in f if line.strip()]
+        if not pending:
+            return
+
+        remaining = []
+        for key in pending:
+            pdf = (self._zotero_client.find_local_pdf(key) or
+                   self._zotero_client.find_pdf_via_attachments(key))
+            if pdf:
+                print(f"\n📎 [{datetime.now().strftime('%H:%M:%S')}] "
+                      f"PDF 已就绪（之前等待的条目）: {key}")
+                print(f"   文件: {os.path.basename(pdf)}")
+                popup_terminal_for_item(key, self.config)
+                time.sleep(2)
+            else:
+                remaining.append(key)
+
+        # 更新 pending 文件（只保留仍无 PDF 的条目）
+        with open(pending_file, 'w') as f:
+            for k in remaining:
+                f.write(k + '\n')
 
     def run(self):
         if not os.path.exists(self.db_path):
