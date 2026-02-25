@@ -239,7 +239,18 @@ def process_item(item_key, zotero_client, llm_client, config, dry_run=False):
     # 6. 更新 INDEX.md
     update_index(config['output']['index_file'], metadata, tags, analysis_path, notes_dir)
 
-    # 7. 写入 Zotero 笔记
+    # 7. 将 Markdown 以「链接文件」方式挂到 Zotero 条目
+    try:
+        att_key = zotero_client.add_linked_markdown(item_key, analysis_path)
+        print(f"  ✅ Markdown 已关联到 Zotero 附件 (key: {att_key})")
+    except FileNotFoundError as e:
+        print(f"  ⚠️  附件关联失败: {e}")
+    except RuntimeError as e:
+        print(f"  ⚠️  {e}")
+    except Exception as e:
+        print(f"  ⚠️  Zotero 附件关联失败（不影响其他写入）: {e}")
+
+    # 8. 写入 Zotero 笔记
     try:
         zotero_client.add_note(item_key, analysis_with_note)
         print(f"  ✅ Zotero 笔记已写入")
@@ -248,7 +259,7 @@ def process_item(item_key, zotero_client, llm_client, config, dry_run=False):
     except Exception as e:
         print(f"  ⚠️  Zotero 笔记写入失败: {e}")
 
-    # 8. 写入 Zotero 标签
+    # 9. 写入 Zotero 标签
     try:
         zotero_client.add_tags(item_key, tags)
         print(f"  ✅ Zotero 标签已写入: {tags}")

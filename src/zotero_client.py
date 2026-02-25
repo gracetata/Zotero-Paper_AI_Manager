@@ -146,6 +146,42 @@ class ZoteroClient:
         resp.raise_for_status()
         return resp.json()
 
+    def add_linked_markdown(self, item_key, markdown_path, title=None):
+        """
+        将本地 Markdown 文件以「链接文件」方式挂到 Zotero 条目下。
+        不上传文件内容，仅存储本地路径；Zotero 桌面端可直接打开。
+        """
+        abs_path = os.path.abspath(markdown_path)
+        if not os.path.exists(abs_path):
+            raise FileNotFoundError(f"Markdown 文件不存在: {abs_path}")
+
+        fname = os.path.basename(abs_path)
+        link_title = title or f"📝 AI分析 — {fname}"
+
+        attachment_data = [{
+            'itemType': 'attachment',
+            'linkMode': 'linked_file',
+            'parentItem': item_key,
+            'title': link_title,
+            'path': abs_path,
+            'contentType': 'text/plain',
+            'charset': 'utf-8',
+            'tags': [],
+            'collections': [],
+            'relations': {},
+        }]
+        resp = self._write_session.post(f"{self._base_url}/items", json=attachment_data)
+        if resp.status_code == 403:
+            raise RuntimeError("Zotero API key 缺少写权限，请在 zotero.org/settings/keys 启用写访问")
+        resp.raise_for_status()
+        result = resp.json()
+        # 返回新建附件的 key
+        successful = result.get('successful', {})
+        if successful:
+            att_key = list(successful.values())[0].get('key', '?')
+            return att_key
+        return result
+
     def add_tags(self, item_key, tags):
         """为条目添加标签（用 requests PATCH，不覆盖已有标签）"""
         # 先用 pyzotero 读取当前条目（含 version 字段，必须用于乐观锁）
