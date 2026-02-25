@@ -57,14 +57,22 @@
         },
         "paperManager.model": {
           "type": "string",
-          "default": "claude-3.5-sonnet",
+          "default": "claude-sonnet-4-6",
           "enum": [
+            "claude-sonnet-4-6",
             "claude-3.5-sonnet",
             "claude-3-opus",
             "claude-3-haiku",
             "gpt-4o"
           ],
-          "description": "用于分析的 AI 模型"
+          "description": "用于分析的 AI 模型",
+          "enumDescriptions": [
+            "Claude Sonnet 4.6（推荐，Copilot 最新）",
+            "Claude 3.5 Sonnet",
+            "Claude 3 Opus（最强推理）",
+            "Claude 3 Haiku（最快）",
+            "GPT-4o"
+          ]
         },
         "paperManager.zoteroStoragePath": {
           "type": "string",

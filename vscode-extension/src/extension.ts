@@ -28,7 +28,7 @@ function getConfig() {
         python: cfg.get<string>('pythonPath') || 'python3',
         project: projectPath,
         storage: zoteroStorage,
-        model: cfg.get<string>('model') || 'claude-3.5-sonnet',
+        model: cfg.get<string>('model') || 'claude-sonnet-4-6',
     };
 }
 
@@ -152,7 +152,7 @@ async function analyzePaper(itemKey: string, autoTriggered = false) {
         log(`② 调用 Copilot 模型: ${model}`);
         let selectedModel: vscode.LanguageModelChat | undefined;
         const familiesToTry = model.startsWith('claude')
-            ? [model, 'claude-3.5-sonnet', 'claude-3-sonnet', 'claude', 'gpt-4o']
+            ? [model, 'claude-sonnet-4-6', 'claude-3.5-sonnet', 'claude', 'gpt-4o']
             : ['gpt-4o', 'claude-3.5-sonnet', 'claude'];
         for (const family of familiesToTry) {
             try {
