@@ -201,12 +201,13 @@ async function analyzePaper(itemKey: string, autoTriggered = false) {
         const skillPrompt = loadSkillPrompt(project);
         const validTags = loadValidTags(project);
         const tagInstr = `\n\n---\n严格只从以下标签中选择（禁止创建新标签）：\n${validTags.join('、')}\n\n分析末尾单独一行输出：\nTAGS: [标签1, 标签2, ...]`;
-        const maxChars = 60000;
+        const maxCharsConfig = vscode.workspace.getConfiguration('paperManager').get<number>('maxChars', 0);
+        const maxChars = maxCharsConfig && maxCharsConfig > 0 ? maxCharsConfig : 0; // 0 = no limit
         const totalChars = pdfText.length;
         let usedText: string;
         let readNote: string;
 
-        if (totalChars <= maxChars) {
+        if (maxChars === 0 || totalChars <= maxChars) {
             usedText = pdfText;
             readNote = '全文';
             log(`   ✅ 全文读取: ${totalChars} 字符`);

@@ -89,6 +89,12 @@
           "type": "string",
           "default": "",
           "description": "Zotero storage 路径（留空自动检测 ~/Zotero/storage）"
+        },
+        "paperManager.maxChars": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "发送给 AI 的最大字符数（0 = 不限制，全文发送；适用于 Claude Sonnet/Opus 等长上下文模型。若限制，超出时取首 67% + 尾 33%）"
         }
       }
     }
