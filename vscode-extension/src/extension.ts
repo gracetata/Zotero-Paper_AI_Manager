@@ -202,14 +202,29 @@ async function analyzePaper(itemKey: string, autoTriggered = false) {
         const validTags = loadValidTags(project);
         const tagInstr = `\n\n---\n严格只从以下标签中选择（禁止创建新标签）：\n${validTags.join('、')}\n\n分析末尾单独一行输出：\nTAGS: [标签1, 标签2, ...]`;
         const maxChars = 60000;
-        const truncated = pdfText.length > maxChars;
-        const usedText = truncated ? pdfText.slice(0, maxChars) : pdfText;
-        const readPct = Math.round(usedText.length / pdfText.length * 100);
-        log(truncated ? `   ⚠️  截断: 前 ${usedText.length} 字符 (${readPct}%)` : `   ✅ 全文: ${usedText.length} 字符`);
+        const totalChars = pdfText.length;
+        let usedText: string;
+        let readNote: string;
+
+        if (totalChars <= maxChars) {
+            usedText = pdfText;
+            readNote = '全文';
+            log(`   ✅ 全文读取: ${totalChars} 字符`);
+        } else {
+            // 首尾拼接：保留前 2/3 + 后 1/3，覆盖摘要/引言 和 实验/结论
+            const headChars = Math.floor(maxChars * 0.67);
+            const tailChars = maxChars - headChars;
+            const head = pdfText.slice(0, headChars);
+            const tail = pdfText.slice(-tailChars);
+            usedText = head + '\n\n[... 中间部分已省略 ...]\n\n' + tail;
+            const readPct = Math.round(maxChars / totalChars * 100);
+            readNote = `首尾拼接 ${readPct}%（前 ${headChars} + 后 ${tailChars} 字符，共 ${totalChars}）`;
+            log(`   ⚠️  文本超长，首尾拼接: 前${headChars} + 后${tailChars} 字符 (${readPct}% of ${totalChars})`);
+        }
 
         const messages = [
             vscode.LanguageModelChatMessage.Assistant(skillPrompt + tagInstr),
-            vscode.LanguageModelChatMessage.User(`请分析以下论文（${truncated ? `前${readPct}%` : '全文'}）：\n\n${usedText}`),
+            vscode.LanguageModelChatMessage.User(`请分析以下论文（${readNote}）：\n\n${usedText}`),
         ];
 
         let analysis = '';
