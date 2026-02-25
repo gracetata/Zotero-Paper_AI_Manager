@@ -62,21 +62,27 @@
         },
         "paperManager.model": {
           "type": "string",
-          "default": "claude-sonnet-4-6",
+          "default": "claude-sonnet-4.6",
           "enum": [
-            "claude-sonnet-4-6",
-            "claude-3.5-sonnet",
-            "claude-3-opus",
-            "claude-3-haiku",
-            "gpt-4o"
+            "claude-sonnet-4.6",
+            "claude-opus-4.6",
+            "claude-sonnet-4.5",
+            "claude-haiku-4.5",
+            "claude-opus-4.5",
+            "gpt-4o",
+            "gpt-5.1",
+            "gemini-2.5-pro"
           ],
           "description": "用于分析的 AI 模型",
           "enumDescriptions": [
-            "Claude Sonnet 4.6（推荐，Copilot 最新）",
-            "Claude 3.5 Sonnet",
-            "Claude 3 Opus（最强推理）",
-            "Claude 3 Haiku（最快）",
-            "GPT-4o"
+            "Claude Sonnet 4.6（推荐）",
+            "Claude Opus 4.6（最强，较慢）",
+            "Claude Sonnet 4.5",
+            "Claude Haiku 4.5（最快）",
+            "Claude Opus 4.5",
+            "GPT-4o",
+            "GPT-5.1",
+            "Gemini 2.5 Pro"
           ]
         },
         "paperManager.zoteroStoragePath": {

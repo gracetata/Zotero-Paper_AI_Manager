@@ -40,18 +40,23 @@ async function resolveModel(preferredFamily: string): Promise<vscode.LanguageMod
     let m = available.find(m => m.family === preferredFamily);
     if (m) { return m; }
 
-    // 2. family 包含关键词（如设置 "claude-sonnet-4-6"，实际叫 "claude-sonnet-4-5"）
-    const keyword = preferredFamily.split('-').slice(0, 3).join('-'); // "claude-sonnet-4"
-    m = available.find(m => m.family.includes(keyword) || m.name.toLowerCase().includes(keyword));
+    // 2. 归一化后匹配（忽略 - 和 . 的差异，如 "claude-sonnet-4-6" 匹配 "claude-sonnet-4.6"）
+    const normalize = (s: string) => s.replace(/[-_.]/g, '').toLowerCase();
+    m = available.find(m => normalize(m.family) === normalize(preferredFamily));
     if (m) { return m; }
 
-    // 3. 只要是 claude 就行
+    // 3. family 前缀匹配（"claude-sonnet" 匹配 "claude-sonnet-4.6"）
+    const prefix = preferredFamily.split(/[-.]/).slice(0, 3).join('').toLowerCase();
+    m = available.find(m => normalize(m.family).startsWith(prefix));
+    if (m) { return m; }
+
+    // 4. 只要是 claude 就行
     if (preferredFamily.startsWith('claude')) {
         m = available.find(m => m.family.includes('claude') || m.name.toLowerCase().includes('claude'));
         if (m) { return m; }
     }
 
-    // 4. 返回列表第一个
+    // 5. 返回列表第一个
     return available[0];
 }
 
@@ -63,7 +68,7 @@ function getConfig() {
         python: cfg.get<string>('pythonPath') || 'python3',
         project: projectPath,
         storage: zoteroStorage,
-        model: cfg.get<string>('model') || 'claude-sonnet-4-6',
+        model: cfg.get<string>('model') || 'claude-sonnet-4.6',
     };
 }
 
