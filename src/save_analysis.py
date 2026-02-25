@@ -130,6 +130,13 @@ def main():
     try:
         item = zc.zot.item(item_key)
         data = item['data']
+        # 如果传入的是附件 key（storage 目录名），解析父论文 key
+        if data.get('itemType') == 'attachment' and data.get('parentItem'):
+            parent_key = data['parentItem']
+            print(f"ℹ️  {item_key} 是附件，使用父论文 key: {parent_key}", file=sys.stderr)
+            item_key = parent_key
+            item = zc.zot.item(item_key)
+            data = item['data']
         title = data.get('title', f'Paper_{item_key}')
         year = ''
         if data.get('date'):
