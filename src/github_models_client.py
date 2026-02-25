@@ -98,6 +98,14 @@ class GitHubModelsClient:
         ant_cfg = config.get('anthropic', {})
         self.anthropic_key = ant_cfg.get('api_key', '')
 
+        # 预定义标签（严格白名单）
+        tags_cfg = config.get('tags', {})
+        self.valid_tags = (
+            tags_cfg.get('domain', []) +
+            tags_cfg.get('method', []) +
+            tags_cfg.get('status', [])
+        )
+
         # 模型切换阈值
         fb_cfg = config.get('model_fallback', {})
         self.fallback_enabled = fb_cfg.get('enabled', True)
@@ -189,23 +197,62 @@ class GitHubModelsClient:
             parts.append(f"\n---\n\n**论文全文**:\n\n{pdf_text}")
         else:
             parts.append('\n（注：未能提取 PDF 全文，请仅基于以上元数据进行分析，对未知内容标注"原文未提及"）')
+
+        # 严格标签约束：注入可用标签白名单
+        if self.valid_tags:
+            tag_list = json.dumps(self.valid_tags, ensure_ascii=False)
+            parts.append(
+                f"\n---\n\n**【标签选择——严格要求】**\n"
+                f"请从下方白名单中选出 2-5 个最贴切的标签，输出为 JSON 数组。\n"
+                f"⚠️ 只能使用白名单中的原文标签，禁止创造任何新标签，禁止修改标签文字。\n"
+                f"白名单：{tag_list}\n"
+                f"输出格式示例（放在分析末尾）：\n"
+                f'**推荐标签**: ["四足机器人", "强化学习", "真实实验"]'
+            )
         return '\n'.join(parts)
 
     def extract_tags_from_analysis(self, analysis_text, valid_tags=None):
-        """提取标签：先找 JSON 数组，兜底用关键词匹配"""
+        """
+        从 LLM 输出中提取标签，严格过滤到白名单。
+        策略：
+          1. 找 JSON 数组 → 过滤到 valid_tags
+          2. 找「推荐标签:」行 → 解析其中标签 → 过滤到 valid_tags
+          3. 任何非白名单标签直接丢弃（不做关键词匹配，避免误判）
+        """
+        whitelist = set(valid_tags or self.valid_tags)
         found_tags = []
-        matches = re.findall(r'\[([^\[\]]{5,200})\]', analysis_text)
+
+        # 策略1: 找 JSON 数组（如 ["A", "B", "C"]）
+        matches = re.findall(r'\[([^\[\]]{2,300})\]', analysis_text)
         for match in matches:
             try:
                 tags = json.loads(f'[{match}]')
                 if tags and all(isinstance(t, str) for t in tags):
-                    if valid_tags:
-                        tags = [t for t in tags if t in valid_tags]
-                    if tags:
-                        found_tags = tags
+                    filtered = [t.strip() for t in tags if t.strip() in whitelist]
+                    if filtered:
+                        found_tags = filtered
                         break
             except (json.JSONDecodeError, ValueError):
                 continue
-        if not found_tags and valid_tags:
-            found_tags = [t for t in valid_tags if t in analysis_text][:8]
+
+        # 策略2: 找「推荐标签」行，逐个词匹配白名单
+        if not found_tags:
+            tag_line_match = re.search(
+                r'(?:推荐标签|建议标签|标签)[：:]\s*(.+)', analysis_text
+            )
+            if tag_line_match:
+                line = tag_line_match.group(1)
+                # 去掉 markdown 格式，按常见分隔符切分
+                line = re.sub(r'[`\[\]"\'【】]', ' ', line)
+                candidates = re.split(r'[,，、\s]+', line)
+                found_tags = [c.strip() for c in candidates if c.strip() in whitelist]
+
+        # 策略3: 在整个文本里逐一精确子串匹配白名单（兜底）
+        # 中文标签不需要词边界，直接子串匹配即可（标签本身都是专业词汇，误判率极低）
+        if not found_tags and whitelist:
+            for tag in whitelist:
+                if tag in analysis_text:
+                    found_tags.append(tag)
+            found_tags = found_tags[:5]  # 最多5个
+
         return found_tags

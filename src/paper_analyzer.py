@@ -221,13 +221,16 @@ def process_item(item_key, zotero_client, llm_client, config, dry_run=False):
     read_status_note = _build_read_status_note(read_ratio, actual_chars, original_pdf_chars, total_pages, llm_client.model)
     analysis_with_note = read_status_note + '\n\n' + analysis
 
-    # 4. 提取标签
+    # 4. 提取标签（严格白名单过滤，不生成新标签）
     all_valid_tags = (
         config['tags'].get('domain', []) +
         config['tags'].get('method', []) +
         config['tags'].get('status', [])
     )
     tags = llm_client.extract_tags_from_analysis(analysis, valid_tags=all_valid_tags)
+    # 最终兜底：再过滤一次，确保没有任何非白名单标签混入
+    tags = [t for t in tags if t in all_valid_tags]
+    # 如果没有状态标签，补充默认状态（'已读' 在白名单内）
     if not any(t in config['tags'].get('status', []) for t in tags):
         tags.append('已读')
     print(f"  🏷️  推荐标签: {tags}")
