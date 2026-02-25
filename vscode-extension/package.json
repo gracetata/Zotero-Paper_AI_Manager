@@ -40,6 +40,11 @@
         "command": "paperManager.debugStatus",
         "title": "🔧 Debug: Show Watcher Status",
         "category": "Paper Manager"
+      },
+      {
+        "command": "paperManager.listModels",
+        "title": "🤖 List Available Copilot Models",
+        "category": "Paper Manager"
       }
     ],
     "configuration": {

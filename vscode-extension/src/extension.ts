@@ -20,6 +20,41 @@ let isWatching = false;
 const recentlyProcessed = new Set<string>();
 const pendingFiles = new Map<string, ReturnType<typeof setTimeout>>();
 
+// 缓存一次查到的可用模型（避免每次分析都重新查询）
+let cachedModels: vscode.LanguageModelChat[] = [];
+
+async function getAvailableModels(): Promise<vscode.LanguageModelChat[]> {
+    if (cachedModels.length > 0) { return cachedModels; }
+    try {
+        cachedModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    } catch { cachedModels = []; }
+    return cachedModels;
+}
+
+/** 根据用户设置的 model 字符串，在实际可用列表里找最匹配的模型 */
+async function resolveModel(preferredFamily: string): Promise<vscode.LanguageModelChat | undefined> {
+    const available = await getAvailableModels();
+    if (available.length === 0) { return undefined; }
+
+    // 1. 精确匹配 family
+    let m = available.find(m => m.family === preferredFamily);
+    if (m) { return m; }
+
+    // 2. family 包含关键词（如设置 "claude-sonnet-4-6"，实际叫 "claude-sonnet-4-5"）
+    const keyword = preferredFamily.split('-').slice(0, 3).join('-'); // "claude-sonnet-4"
+    m = available.find(m => m.family.includes(keyword) || m.name.toLowerCase().includes(keyword));
+    if (m) { return m; }
+
+    // 3. 只要是 claude 就行
+    if (preferredFamily.startsWith('claude')) {
+        m = available.find(m => m.family.includes('claude') || m.name.toLowerCase().includes('claude'));
+        if (m) { return m; }
+    }
+
+    // 4. 返回列表第一个
+    return available[0];
+}
+
 function getConfig() {
     const cfg = vscode.workspace.getConfiguration('paperManager');
     const projectPath = cfg.get<string>('projectPath') || path.join(os.homedir(), 'Workspace', 'PaperManager');
@@ -149,22 +184,14 @@ async function analyzePaper(itemKey: string, autoTriggered = false) {
         }
 
         progress.report({ message: `调用 ${model} 分析...` });
-        log(`② 调用 Copilot 模型: ${model}`);
-        let selectedModel: vscode.LanguageModelChat | undefined;
-        const familiesToTry = model.startsWith('claude')
-            ? [model, 'claude-sonnet-4-6', 'claude-3.5-sonnet', 'claude', 'gpt-4o']
-            : ['gpt-4o', 'claude-3.5-sonnet', 'claude'];
-        for (const family of familiesToTry) {
-            try {
-                const models = await vscode.lm.selectChatModels({ vendor: 'copilot', family });
-                if (models.length > 0) { selectedModel = models[0]; log(`   模型: ${selectedModel.name} (${family})`); break; }
-            } catch { /* try next */ }
-        }
+        log(`② 调用 Copilot 模型 (偏好: ${model})...`);
+        const selectedModel = await resolveModel(model);
         if (!selectedModel) {
             log('❌ 未找到 Copilot 模型，请确保已登录 GitHub Copilot');
             vscode.window.showErrorMessage('未找到可用的 Copilot 模型。请确保 GitHub Copilot 已登录。');
             return;
         }
+        log(`   实际使用: ${selectedModel.name}  (family: ${selectedModel.family})`);
 
         const skillPrompt = loadSkillPrompt(project);
         const validTags = loadValidTags(project);
@@ -322,6 +349,32 @@ export function activate(context: vscode.ExtensionContext) {
                 if (r === '启动') { startWatcher(); updateBar(); }
             } else {
                 vscode.window.showInformationMessage('监听器运行正常 ✅');
+            }
+        }),
+        vscode.commands.registerCommand('paperManager.listModels', async () => {
+            outputChannel.show();
+            log('\n🤖 查询 Copilot 可用模型...');
+            cachedModels = []; // 强制刷新缓存
+            try {
+                const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+                cachedModels = models;
+                if (models.length === 0) {
+                    log('❌ 未找到任何模型，请确保 GitHub Copilot 已登录');
+                    vscode.window.showErrorMessage('未找到 Copilot 模型，请先登录 GitHub Copilot');
+                } else {
+                    log(`✅ 共 ${models.length} 个可用模型：\n`);
+                    for (const m of models) {
+                        log(`   name:   ${m.name}`);
+                        log(`   family: ${m.family}   ← 填入 paperManager.model 设置`);
+                        log(`   id:     ${m.id}\n`);
+                    }
+                    const preferred = getConfig().model;
+                    const resolved = await resolveModel(preferred);
+                    log(`   当前设置: "${preferred}"`);
+                    log(`   实际匹配: ${resolved ? `${resolved.name} (family: ${resolved.family})` : '❌ 无匹配'}`);
+                }
+            } catch(e) {
+                log(`❌ 查询失败: ${e}`);
             }
         }),
         outputChannel, statusBar
