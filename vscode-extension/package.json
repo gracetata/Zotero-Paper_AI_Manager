@@ -4,9 +4,15 @@
   "description": "使用 GitHub Copilot (Claude) 自动分析 Zotero 论文",
   "version": "1.0.0",
   "publisher": "local",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -23,6 +29,16 @@
       {
         "command": "paperManager.analyzeAll",
         "title": "📚 Analyze All Unprocessed Papers",
+        "category": "Paper Manager"
+      },
+      {
+        "command": "paperManager.chatWithPaper",
+        "title": "💬 Chat / Follow-up with Paper",
+        "category": "Paper Manager"
+      },
+      {
+        "command": "paperManager.debugStatus",
+        "title": "🔧 Debug: Show Watcher Status",
         "category": "Paper Manager"
       }
     ],
@@ -42,7 +58,12 @@
         "paperManager.model": {
           "type": "string",
           "default": "claude-3.5-sonnet",
-          "enum": ["claude-3.5-sonnet", "claude-3-opus", "claude-3-haiku", "gpt-4o"],
+          "enum": [
+            "claude-3.5-sonnet",
+            "claude-3-opus",
+            "claude-3-haiku",
+            "gpt-4o"
+          ],
           "description": "用于分析的 AI 模型"
         },
         "paperManager.zoteroStoragePath": {
