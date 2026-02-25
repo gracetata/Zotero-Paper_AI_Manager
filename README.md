@@ -1,9 +1,10 @@
-# 🧠 ZoteroPaperManager — AI 驱动的文献自动分析系统
+# 🧠 Zotero-Paper_AI_Manager
 
-> 将论文加入 Zotero，AI 自动深度阅读、结构化分析、打标签、写笔记 —— 一气呵成
+> AI 驱动的 Zotero 文献自动分析系统：论文加入 Zotero，自动深度阅读、结构化分析、打标签、写笔记、追问对话 —— 一气呵成
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![GitHub Models](https://img.shields.io/badge/GitHub%20Models-GPT--4o-black)](https://github.com/marketplace/models)
 
 ---
 
@@ -12,12 +13,14 @@
 | 功能 | 说明 |
 |------|------|
 | 🤖 **AI 深度阅读** | 不是简单摘要——基于专属 Skill 框架，分析问题/Insight/方法/实验/局限性 |
-| 📄 **全文提取** | 读取完整 PDF（非摘要截取），并**明确告知你读取了多少比例** |
+| 📄 **全文透明读取** | 读取完整 PDF，**明确告知读取了多少比例**（如 100% / 62%），不静默截断 |
 | 🏷️ **智能标签** | 从预定义领域标签中自动匹配，直接写入 Zotero |
+| 📎 **Markdown 附件** | 分析 Markdown 自动关联为 Zotero 条目附件，Zotero 内一键打开 |
+| 💬 **论文追问对话** | `paper_chat.py` 支持基于论文内容的多轮 AI 追问，终端直接对话 |
 | 📝 **双写入** | 同时生成本地 Markdown 笔记 + Zotero 内置笔记 |
 | 📑 **自动索引** | 维护 `INDEX.md` 全库目录，按年份分类，含标签和链接 |
-| ⚡ **多模型支持** | GPT-4o（免费）+ Claude Haiku/Sonnet 4.6（大上下文长文献） |
-| 🔁 **批量处理** | 一键分析整个现有文献库（277+ 篇） |
+| ⚡ **多模型支持** | GPT-4o（免费）+ Claude Haiku/Sonnet 4.6（大上下文，适合长文献） |
+| 🔁 **批量处理** | 一键分析整个现有文献库（支持断点续跑，跳过已处理） |
 | 👁️ **监控自动化** | watchdog 监控 Zotero 数据库，新增论文秒级自动触发 |
 
 ---
@@ -26,14 +29,15 @@
 
 ```
 ============================================================
-🔍 正在处理: ABCD1234
-  📄 标题: Learning to Walk in Minutes...
-  👤 作者: Zhuang et al.
-  📅 年份: 2024
+🔍 正在处理: LVSSLJLL
+  📄 标题: Constrained Sampling to Guide Universal Manipulation RL
+  👤 作者: Toussaint, Marc et al.
+  📅 年份: 2026
   📖 PDF: 12 页，48,271 字符（全文）
   ✅ 全文已读取（48,271 字符，100%）
-  🏷️  推荐标签: ['强化学习', '四足机器人', '真实实验']
-  ✅ Markdown 已保存: notes/2024/Learning_to_Walk.md
+  🏷️  推荐标签: ['强化学习', '运动规划', '真实实验', '基于模型']
+  ✅ Markdown 已保存: notes/2026/Constrained_Sampling.md
+  ✅ Markdown 已关联到 Zotero 附件 (key: XYZW1234)
   ✅ INDEX.md 已更新
   ✅ Zotero 笔记已写入
   ✅ Zotero 标签已写入
@@ -64,10 +68,13 @@ Zotero 新增论文
         │  3. 本质启发与局限性              │
         └───────────────────────────────────┘
                 │
-       ┌────────┼────────┬──────────┐
-       ▼        ▼        ▼          ▼
-  Markdown   INDEX.md  Zotero    Zotero
-   笔记文件   总目录     笔记      标签
+       ┌────────┼──────────┬──────────┬──────────┐
+       ▼        ▼          ▼          ▼          ▼
+  Markdown   INDEX.md  Zotero    Zotero    Zotero
+   笔记文件   总目录    附件链接   笔记      标签
+                                ↕
+                         paper_chat.py
+                         （多轮追问对话）
 ```
 
 ---
@@ -75,8 +82,8 @@ Zotero 新增论文
 ## 📦 安装
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/PaperManager.git
-cd PaperManager
+git clone https://github.com/gracetata/Zotero-Paper_AI_Manager.git
+cd Zotero-Paper_AI_Manager
 
 # 安装依赖
 pip install -r requirements.txt
@@ -98,14 +105,16 @@ cp config.example.yaml config.yaml
 
 ## 🚀 使用方法
 
+### 分析论文
+
 ```bash
 cd src/
 
 # 分析最近1篇（测试用）
 python paper_analyzer.py --recent 1
 
-# 分析指定论文
-python paper_analyzer.py --key ZOTERO_ITEM_KEY
+# 分析指定论文（用 Zotero Item Key）
+python paper_analyzer.py --key LVSSLJLL
 
 # 批量分析全库（智能跳过已处理）
 python paper_analyzer.py --all
@@ -119,17 +128,78 @@ python paper_analyzer.py --recent 1 --model claude-haiku-4-5
 python paper_analyzer.py --recent 1 --model claude-sonnet-4-6
 ```
 
-### 自动监控模式（开机自启）
+### 💬 追问对话（paper_chat.py）
+
+分析完成后，可对任意论文开启 AI 对话追问：
 
 ```bash
-# 启动后台监控（Zotero 新增论文自动触发分析）
-systemctl --user start zotero-watcher
+cd src/
 
-# 查看运行状态
-systemctl --user status zotero-watcher
+# 用 Zotero Item Key 加载论文（自动找已有分析 + 加载 PDF）
+python paper_chat.py --key LVSSLJLL
 
-# 停止
-systemctl --user stop zotero-watcher
+# 直接指定已有分析 Markdown 文件
+python paper_chat.py --md ../notes/2026/Constrained_Sampling.md
+
+# 用 Claude 模型（推荐，上下文更大）
+python paper_chat.py --key LVSSLJLL --model claude-haiku-4-5
+
+# 不加载 PDF（快速模式，只基于已有分析追问）
+python paper_chat.py --key LVSSLJLL --no-pdf
+```
+
+**对话内置命令：**
+
+| 命令 | 说明 |
+|------|------|
+| `/clear` | 清空对话历史，重新开始 |
+| `/info` | 显示当前论文信息和使用的模型 |
+| `q` / `exit` | 退出追问模式 |
+
+**示例对话：**
+```
+📄 论文: Constrained Sampling to Guide Universal Manipulation RL
+🤖 模型: gpt-4o
+
+你: 这篇文章的核心方法和普通 RL 有什么本质区别？
+🤖 AI: 该论文的核心区别在于...（详细回答）
+
+你: 它的 constraint sampling 在实际机器人上怎么实现的？
+🤖 AI: 在真实机器人实验中...
+
+你: /clear
+✅ 对话历史已清空
+
+你: q
+👋 退出追问模式
+```
+
+---
+
+## 🔑 如何找到 Zotero Item Key
+
+**Zotero Item Key** 是 8 位字母数字组合（如 `LVSSLJLL`），是 Zotero 每个条目的唯一 ID。
+
+三种获取方式：
+
+**① 从 INDEX.md 获取（最方便）**
+```
+notes/INDEX.md 中每行都含有 Markdown 链接，文件名里即为标题，
+对应 Key 在各分析文件 frontmatter 的 zotero_key 字段
+```
+
+**② 从分析 Markdown 文件 frontmatter 获取**
+```yaml
+---
+zotero_key: LVSSLJLL    ← 这就是 Item Key
+title: "Constrained Sampling..."
+---
+```
+
+**③ 从 Zotero 网页版获取**
+```
+打开 https://www.zotero.org/your-username/items
+点击任意条目 → URL 变为 .../items/LVSSLJLL ← 最后这段即为 Key
 ```
 
 ---
@@ -149,21 +219,22 @@ systemctl --user stop zotero-watcher
 ## 📁 项目结构
 
 ```
-PaperManager/
+Zotero-Paper_AI_Manager/
 ├── skills/
 │   └── read-paper/
-│       └── SKILL.md          # AI 阅读框架（可自定义）
+│       └── SKILL.md              # AI 阅读框架（可自定义）
 ├── src/
-│   ├── paper_analyzer.py     # 主入口（CLI）
-│   ├── zotero_client.py      # Zotero API 封装
-│   ├── pdf_extractor.py      # PDF 全文提取
-│   ├── github_models_client.py  # LLM 多模型客户端
-│   └── watch_zotero.py       # 自动监控
-├── notes/                    # 分析输出（.gitignore 中）
-│   ├── INDEX.md              # 全库索引
-│   └── 2024/                 # 按年份分类
-├── config.yaml               # 你的配置（含 API Key，不提交！）
-├── config.example.yaml       # 配置模板（安全提交）
+│   ├── paper_analyzer.py         # 主入口：分析 + 写回 Zotero
+│   ├── paper_chat.py             # 追问对话模式
+│   ├── zotero_client.py          # Zotero API 封装
+│   ├── pdf_extractor.py          # PDF 全文提取
+│   ├── github_models_client.py   # LLM 多模型客户端
+│   └── watch_zotero.py           # 自动监控
+├── notes/                        # 分析输出（.gitignore 中）
+│   ├── INDEX.md                  # 全库索引（含 Item Key 和标签）
+│   └── 2024/ 2025/ 2026/        # 按年份分类的 Markdown 分析文件
+├── config.yaml                   # 你的配置（含 API Key，不提交！）
+├── config.example.yaml           # 配置模板（安全提交）
 └── requirements.txt
 ```
 
@@ -189,6 +260,21 @@ PaperManager/
 4. **本质启发与局限** — 可迁移的启发，以及方法的根本限制
 
 > 可直接修改 `SKILL.md` 定制分析风格，无需改代码
+
+---
+
+## 🔧 自动监控模式（开机自启）
+
+```bash
+# 启动后台监控（Zotero 新增论文自动触发分析）
+systemctl --user start zotero-watcher
+
+# 查看运行状态
+systemctl --user status zotero-watcher
+
+# 停止
+systemctl --user stop zotero-watcher
+```
 
 ---
 
