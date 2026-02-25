@@ -17,12 +17,43 @@ save_analysis.py — 接收 VS Code 扩展通过 stdin 传入的分析文本，�
 import os
 import sys
 import re
+import json
 import yaml
 import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 from zotero_client import ZoteroClient
-from github_models_client import extract_tags_from_analysis
+
+
+def extract_tags(analysis_text: str, valid_tags: list) -> list:
+    """从 LLM 输出提取标签，严格过滤到白名单"""
+    whitelist = set(valid_tags)
+    found = []
+
+    # 策略1: 找 TAGS: [...] 行或 JSON 数组
+    for match in re.findall(r'\[([^\[\]]{2,300})\]', analysis_text):
+        try:
+            tags = json.loads(f'[{match}]')
+            if tags and all(isinstance(t, str) for t in tags):
+                filtered = [t.strip() for t in tags if t.strip() in whitelist]
+                if filtered:
+                    found = filtered
+                    break
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    # 策略2: 找「推荐标签:」行
+    if not found:
+        m = re.search(r'(?:推荐标签|建议标签|TAGS)[：:\s]+(.+)', analysis_text, re.IGNORECASE)
+        if m:
+            line = re.sub(r'[`\[\]"\'【】]', ' ', m.group(1))
+            found = [c.strip() for c in re.split(r'[,，、\s]+', line) if c.strip() in whitelist]
+
+    # 策略3: 全文子串匹配兜底
+    if not found:
+        found = [tag for tag in valid_tags if tag in analysis_text][:5]
+
+    return found
 
 
 def markdown_to_html(text: str) -> str:
@@ -118,7 +149,8 @@ def main():
     clean_analysis, _ = strip_tags_line(clean_analysis)
 
     # 提取标签（严格白名单）
-    tags = extract_tags_from_analysis(analysis, config)
+    valid_tags = config.get('tags', [])
+    tags = extract_tags(analysis, valid_tags)
     print(f"🏷️  标签: {tags}")
 
     # 保存 Markdown
