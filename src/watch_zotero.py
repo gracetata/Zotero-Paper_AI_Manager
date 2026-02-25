@@ -75,17 +75,78 @@ def get_new_item_keys_from_db(db_path, processed_ids, limit=10):
     return new_keys
 
 
-def trigger_analysis(item_key, config_path):
-    """调用 paper_analyzer.py 处理新条目"""
+def find_terminal():
+    """查找可用的终端模拟器，返回启动命令模板"""
+    import shutil
+    # 按优先级尝试
+    candidates = [
+        # (可执行文件, 执行参数模板)  {title}=窗口标题 {cmd}=要运行的命令
+        ('gnome-terminal', ['gnome-terminal', '--title={title}', '--', 'bash', '-c', '{cmd}']),
+        ('xterm',          ['xterm', '-title', '{title}', '-e', 'bash', '-c', '{cmd}']),
+        ('konsole',        ['konsole', '--title', '{title}', '-e', 'bash', '-c', '{cmd}']),
+        ('xfce4-terminal', ['xfce4-terminal', '--title={title}', '-e', 'bash -c {cmd_q}']),
+        ('tilix',          ['tilix', '--title={title}', '-e', 'bash -c {cmd_q}']),
+    ]
+    for exe, template in candidates:
+        if shutil.which(exe):
+            return exe, template
+    return None, None
+
+
+def trigger_analysis_in_terminal(item_key, config_path):
+    """
+    在新终端窗口中运行分析脚本。
+    分析完成后，终端内提示用户是否进入追问模式。
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    shell_script = os.path.join(script_dir, 'analyze_and_chat.sh')
+
+    exe, template = find_terminal()
+    if exe is None:
+        print(f"  ⚠️  未找到图形终端，回退到后台分析模式")
+        trigger_analysis_background(item_key, config_path)
+        return
+
+    title = f"📄 论文分析 — {item_key}"
+    # analyze_and_chat.sh 接收 ITEM_KEY 参数
+    inner_cmd = f'bash "{shell_script}" "{item_key}"; exec bash'
+
+    cmd = []
+    for part in template:
+        cmd.append(
+            part.replace('{title}', title)
+                .replace('{cmd}', inner_cmd)
+                .replace('{cmd_q}', f'"{inner_cmd}"')
+        )
+
+    print(f"\n🆕 [{datetime.now().strftime('%H:%M:%S')}] 发现新论文 {item_key}，弹出终端窗口...")
+
+    # 需要 DISPLAY 环境变量（systemd 服务里要额外设置）
+    env = os.environ.copy()
+    if 'DISPLAY' not in env:
+        env['DISPLAY'] = ':1'
+    # 保留 DBUS_SESSION_BUS_ADDRESS，gnome-terminal 需要
+    try:
+        subprocess.Popen(cmd, env=env, start_new_session=True)
+    except Exception as e:
+        print(f"  ❌ 无法打开终端窗口: {e}，回退到后台模式")
+        trigger_analysis_background(item_key, config_path)
+
+
+def trigger_analysis_background(item_key, config_path):
+    """回退：后台静默分析（无图形环境时使用）"""
     analyzer_path = os.path.join(os.path.dirname(__file__), 'paper_analyzer.py')
     cmd = [sys.executable, analyzer_path, '--key', item_key, '--config', config_path]
-    print(f"\n🆕 [{datetime.now().strftime('%H:%M:%S')}] 发现新论文 {item_key}，开始分析...")
+    print(f"\n🆕 [{datetime.now().strftime('%H:%M:%S')}] 后台分析: {item_key}")
     try:
-        result = subprocess.run(cmd, capture_output=False, text=True)
-        if result.returncode != 0:
-            print(f"  ❌ 分析进程退出码: {result.returncode}")
+        subprocess.Popen(cmd)
     except Exception as e:
         print(f"  ❌ 触发分析失败: {e}")
+
+
+def trigger_analysis(item_key, config_path):
+    """触发分析（优先弹出终端，无图形时后台运行）"""
+    trigger_analysis_in_terminal(item_key, config_path)
 
 
 class ZoteroDBHandler(FileSystemEventHandler):
