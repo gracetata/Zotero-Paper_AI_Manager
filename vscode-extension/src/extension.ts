@@ -163,12 +163,12 @@ async function analyzePaper(itemKey: string, autoTriggered = false) {
         outputChannel.show(true);
     }
 
+    let succeeded = false;
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: `📄 分析论文 ${itemKey}`,
         cancellable: false,
     }, async (progress) => {
-
         progress.report({ message: '提取 PDF 文本...' });
         log('① 提取 PDF 文本...');
         let pdfText: string;
@@ -255,12 +255,17 @@ async function analyzePaper(itemKey: string, autoTriggered = false) {
         }
 
         log(`✅ 完成: ${itemKey}`);
+        succeeded = true;
+    });
+
+    // 进度条关闭后再弹成功提示，避免 withProgress 一直等待
+    if (succeeded) {
         const action = await vscode.window.showInformationMessage(
             `✅ 论文分析完成: ${itemKey}`, '追问对话', '查看日志'
         );
         if (action === '追问对话') { openChat(itemKey); }
         else if (action === '查看日志') { outputChannel.show(); }
-    });
+    }
 }
 
 // ── 文件监听（Node.js fs.watch，比 vscode watcher 更可靠）────
